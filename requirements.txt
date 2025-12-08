@@ -1,0 +1,10 @@
+pypdf
+pytesseract
+Pillow
+langchain
+langchain-community
+langchain-huggingface
+langchain-core
+sentence-transformers
+chromadb
+streamlit
