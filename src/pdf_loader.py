@@ -26,7 +26,7 @@ def load_pdf_pages(pdf_path:str) -> List[str]:
         pages_text.append(text)
         # Now, add cleaned text to the page_text list
 
-        return pages_text
+    return pages_text
 
 if __name__ == "__main__":
     # will run this block only if you run this file directly
