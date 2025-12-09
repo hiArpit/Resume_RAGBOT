@@ -19,7 +19,7 @@ It allows users to query the Eldoria lore PDF, with accurate answers grounded in
 
 ### Clone the repository
 ```bash
-https://github.com/hiArpit/Eldoria-RAGBOT.git
+git clone https://github.com/hiArpit/Eldoria-RAGBOT.git
 cd eldoria
 ```
 ### Create and activate virtual environment
@@ -74,7 +74,7 @@ Example queries:
 - "What role did humans play during the First Ogres’ March?"
 
 ---
-## Demo Screenshot
+## Demo Screenshots of working
 ### Here is the Eldoria RAG Chatbot answering a question:
 
 ![Eldoria RAG Chatbot Demo 1](./screenshots/first.png)
