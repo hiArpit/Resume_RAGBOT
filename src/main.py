@@ -5,7 +5,7 @@ from rag_chain import build_rag_chain
 if __name__ == "__main__":
     # Will run only if this file runs directly
     ask = build_rag_chain()
-    print("Eldoria RAG Chatbot Loaded! Ask anything (type 'exit' to quit)\n")
+    print("Resume ATS Analyzer Chatbot Loaded! Type Job Description (type 'exit' to quit)\n")
 
     try:
         while True:
@@ -18,7 +18,7 @@ if __name__ == "__main__":
             answer = ask(q)
             # Calling the ask() with the user query "q"
             # This performs the retrieval and a model call
-            print("\nEldoriaBot:", answer, "\n")
+            print("\nResume ATS Analyzer ChatBOT:", answer, "\n")
             # Printing the returned answer
     except KeyboardInterrupt:
         print("\nBye!")

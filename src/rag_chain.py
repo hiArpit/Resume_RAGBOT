@@ -50,16 +50,34 @@ def build_rag_chain():
 
         ### Building the final prompted question
         prompt = f"""
-You are an Eldoria Lore expert.
+You are an ATS (Applicant Tracking System) evaluator.
 
-Use ONLY the lore text provided below to answer accurately.
+Your task:
+- Analyze the resume content provided below
+- Compare it strictly against the given Job Description
+- Identify missing skills, tools, and experience
+- Suggest improvements
+- Provide an ATS compatibility score from 0 to 100
 
-Context:
+Resume Content:
 {context}
 
-Question: {question}
+Job Description: {question}
 
-Give a helpful, accurate answer based only on the above content.
+Output Format:
+- ATS Score: XX/100
+- Missing Skills:
+- Weak Areas:
+- Suggestions to Improve Resume:
+
+Scoring Rules:
+- Skills match: 40%
+- Experience relevance: 30%
+- Tools & keywords: 20%
+- Resume clarity & impact: 10%
+
+Explain briefly how each category contributed to the final score.
+NOTE:- Do NOT use external knowledge. If something is missing from the resume context, mark it as missing.
 """
 
         # RAG Prompt is defined

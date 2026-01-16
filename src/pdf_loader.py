@@ -33,7 +33,7 @@ if __name__ == "__main__":
     import os
     # used here for path handling
 
-    pdf_path = os.path.join("data", "eldoria.pdf")
+    pdf_path = os.path.join("data", "Arpit_Negi_Resume.pdf")
     # Builds the file path
     pages = load_pdf_pages(pdf_path)
     # will return the list of page text, stored in pages

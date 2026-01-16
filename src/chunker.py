@@ -40,7 +40,7 @@ def make_chunks(
             # Create a document for this chunk
             doc = Document(
                     page_content=chunk_text,
-                    metadata={"page": i+1, "source": "eldora.pdf"},
+                    metadata={"page": i+1, "source": "Arpit_Negi_Resume.pdf"},
             )
             # Creating a document that contains chunk content
             # Metadata contains page number and source
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     import os
     from pdf_loader import load_pdf_pages
 
-    pdf_path = os.path.join("data", "eldoria.pdf")
+    pdf_path = os.path.join("data", "Arpit_Negi_Resume.pdf")
     # Path to pdf 
     pages = load_pdf_pages(pdf_path)
     # returns the list of page texts

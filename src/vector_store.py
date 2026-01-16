@@ -119,7 +119,7 @@ if __name__ == "__main__":
     from chunker import make_chunks
 
     print("Loading pages...")
-    pages = load_pdf_pages("data/eldoria.pdf")
+    pages = load_pdf_pages("data/Arpit_Negi_Resume.pdf")
     print("Pages:", len(pages))
 
     print("Chunking...")
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     print("Vector store saved!")
 
     # Simple search test
-    query = "Who are the ogres and what did they do?"
+    query = "ML Developer having 3 year experience in Python and Data Science?"
     results = vectordb.similarity_search(query, k=3)
 
     for i, doc in enumerate(results, 1):
