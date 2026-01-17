@@ -1,4 +1,4 @@
-import os
+import os, json
 from langchain_google_genai import ChatGoogleGenerativeAI
 # Importing LangChain's wrapper for using Gemini as LLM
 # This will allow us to call Gemini Models
@@ -52,23 +52,13 @@ def build_rag_chain():
         prompt = f"""
 You are an ATS (Applicant Tracking System) evaluator.
 
-Your task:
-- Analyze the resume content provided below
-- Compare it strictly against the given Job Description
-- Identify missing skills, tools, and experience
-- Suggest improvements
-- Provide an ATS compatibility score from 0 to 100
+Analyze the resume content against the job description and return ONLY valid JSON.
 
 Resume Content:
 {context}
 
-Job Description: {question}
-
-Output Format:
-- ATS Score: XX/100
-- Missing Skills:
-- Weak Areas:
-- Suggestions to Improve Resume:
+Job Description:
+{question}
 
 Scoring Rules:
 - Skills match: 40%
@@ -76,9 +66,26 @@ Scoring Rules:
 - Tools & keywords: 20%
 - Resume clarity & impact: 10%
 
-Explain briefly how each category contributed to the final score.
-NOTE:- Do NOT use external knowledge. If something is missing from the resume context, mark it as missing.
+STRICT OUTPUT FORMAT (JSON ONLY — no markdown, no explanation):
+
+{{
+  "ats_score": number,
+  "skills_match_score": number,
+  "experience_relevance_score": number,
+  "tools_keywords_score": number,
+  "resume_clarity_score": number,
+  "missing_skills": [string],
+  "weak_areas": [string],
+  "suggestions": [string]
+}}
+
+Rules:
+- Scores must be integers
+- Total ats_score must be out of 100
+- Do NOT use external knowledge
+- If data is missing, mark it clearly
 """
+
 
         # RAG Prompt is defined
         # It sets the persona (Eldoria lore expert)
@@ -89,8 +96,24 @@ NOTE:- Do NOT use external knowledge. If something is missing from the resume co
         response = llm.invoke(prompt)
         # Passes the prompt into Gemini
         # .invoke() will return a LangChain message object named response
+        
+        # Clean the response: remove markdown code blocks if present
+        raw_response = response.content.strip()
+        if raw_response.startswith("```"):
+            # Remove markdown code block wrapper
+            raw_response = raw_response.split("```")[1]  # Get content between code blocks
+            if raw_response.startswith("json\n"):
+                raw_response = raw_response[5:]  # Remove 'json\n' prefix
+        
+        try :
+            parsed_output = json.loads(raw_response)
+        except json.JSONDecodeError:
+            parsed_output = {
+                "error": "Invalid JSON response from LLM",
+                "raw_output": raw_response
+            }
 
-        return response.content
+        return parsed_output
         # Retrieving the text portion of the LLM response
     
     return rag_ask

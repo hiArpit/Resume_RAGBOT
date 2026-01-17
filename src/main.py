@@ -18,6 +18,7 @@ if __name__ == "__main__":
             answer = ask(q)
             # Calling the ask() with the user query "q"
             # This performs the retrieval and a model call
+            
             print("\nResume ATS Analyzer ChatBOT:", answer, "\n")
             # Printing the returned answer
     except KeyboardInterrupt:
