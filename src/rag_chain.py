@@ -35,30 +35,66 @@ def build_rag_chain():
 
     # this llm object will be used to answer questions using retrieved context
 
-    ### RAG FUNCTION
-    def rag_ask(question: str):
-        # This function will run the entire RAG flow for a single question
-        docs = retriever.invoke(question)
-        # Sends the question to FAISS
-        # FAISS embeds the question[converting it into numerical vector] -> compares it with your chunk vectors -> returns top-k chunks
-        # docs will be the list of LangChain Document objects [doc.page_content and doc.metadata]
-        
-        context = "\n\n".join([d.page_content for d in docs])
-        # Here, We are extracting text from each retrieved chunk[which is in Document object form]
-        # Joins them with two newlines to form a readable block
-        # This becomes the "source of truth" for the model
+    ### SKILL EXTRACTION FUNCTION
+    def extract_skills_from_resume(resume_content: str):
+        """
+        Extract explicitly mentioned skills from resume content.
+        Returns a list of clean, standardized skill names.
+        """
+        skill_extraction_prompt = f"""
+You are a resume skill extractor. Analyze the resume content and extract ONLY the explicitly mentioned skills.
 
-        ### Building the final prompted question
-        prompt = f"""
+Resume Content:
+{resume_content}
+
+STRICT OUTPUT FORMAT (JSON ONLY — no markdown, no explanation):
+
+{{
+  "skills": [string]
+}}
+
+Rules:
+- Extract ONLY skills that are explicitly mentioned in the resume
+- DO NOT infer or guess skills
+- Return clean, standardized skill names (e.g., "Python", "Project Management")
+- Remove duplicates
+- If no skills are found, return empty array
+"""
+        response = llm.invoke(skill_extraction_prompt)
+        raw_response = response.content.strip()
+        
+        # Clean markdown code blocks if present
+        if raw_response.startswith("```"):
+            raw_response = raw_response.split("```")[1]
+            if raw_response.startswith("json\n"):
+                raw_response = raw_response[5:]
+        
+        try:
+            parsed_skills = json.loads(raw_response)
+            return parsed_skills.get("skills", [])
+        except json.JSONDecodeError:
+            return []
+
+    ### ATS EVALUATION FUNCTION
+    def evaluate_ats(resume_content: str, job_description: str, extracted_skills: list):
+        """
+        Evaluate resume against job description using ATS criteria.
+        Uses extracted skills as context for the evaluation.
+        """
+        # Include extracted skills in the prompt context
+        skills_context = f"\n\nExtracted Skills:\n{', '.join(extracted_skills)}" if extracted_skills else ""
+        
+        ats_prompt = f"""
 You are an ATS (Applicant Tracking System) evaluator.
 
 Analyze the resume content against the job description and return ONLY valid JSON.
 
 Resume Content:
-{context}
+{resume_content}
+{skills_context}
 
 Job Description:
-{question}
+{job_description}
 
 Scoring Rules:
 - Skills match: 40%
@@ -85,36 +121,54 @@ Rules:
 - Do NOT use external knowledge
 - If data is missing, mark it clearly
 """
-
-
-        # RAG Prompt is defined
-        # It sets the persona (Eldoria lore expert)
-        # It strictly tells the model to use only the supplied context.
-        # It inserts your retrieved chunks
-        # Finally adds the user's actual question
-
-        response = llm.invoke(prompt)
-        # Passes the prompt into Gemini
-        # .invoke() will return a LangChain message object named response
-        
-        # Clean the response: remove markdown code blocks if present
+        response = llm.invoke(ats_prompt)
         raw_response = response.content.strip()
-        if raw_response.startswith("```"):
-            # Remove markdown code block wrapper
-            raw_response = raw_response.split("```")[1]  # Get content between code blocks
-            if raw_response.startswith("json\n"):
-                raw_response = raw_response[5:]  # Remove 'json\n' prefix
         
-        try :
+        # Clean markdown code blocks if present
+        if raw_response.startswith("```"):
+            raw_response = raw_response.split("```")[1]
+            if raw_response.startswith("json\n"):
+                raw_response = raw_response[5:]
+        
+        try:
             parsed_output = json.loads(raw_response)
         except json.JSONDecodeError:
             parsed_output = {
                 "error": "Invalid JSON response from LLM",
                 "raw_output": raw_response
             }
-
+        
         return parsed_output
-        # Retrieving the text portion of the LLM response
+
+    ### RAG FUNCTION
+    def rag_ask(question: str):
+        """
+        Run the complete RAG flow with skill extraction and ATS evaluation.
+        Returns combined results: extracted skills + ATS evaluation.
+        """
+        docs = retriever.invoke(question)
+        # Sends the question to FAISS
+        # FAISS embeds the question[converting it into numerical vector] -> compares it with your chunk vectors -> returns top-k chunks
+        # docs will be the list of LangChain Document objects [doc.page_content and doc.metadata]
+        
+        context = "\n\n".join([d.page_content for d in docs])
+        # Here, We are extracting text from each retrieved chunk[which is in Document object form]
+        # Joins them with two newlines to form a readable block
+        # This becomes the "source of truth" for the model
+
+        # STEP 1: Extract skills from resume content
+        extracted_skills = extract_skills_from_resume(context)
+        
+        # STEP 2: Evaluate ATS with extracted skills as context
+        ats_result = evaluate_ats(context, question, extracted_skills)
+        
+        # STEP 3: Combine both results into final output
+        final_output = {
+            "extracted_skills": extracted_skills,
+            "ats_result": ats_result
+        }
+        
+        return final_output
     
     return rag_ask
-    # build_rag_chain() returns the function that performs a full RAG lookup + LLM response/answer
+    # build_rag_chain() returns the function that performs a full RAG lookup + skill extraction + ATS evaluation
