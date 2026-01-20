@@ -32,8 +32,8 @@ def analyze_resume(resume_text: str, job_description: str) -> Dict[str, Any]:
     Raises:
         ValueError: If inputs are empty or API key not set
     """
-    from chunker import make_chunks
-    from vector_store import build_vector_store
+    from .chunker import make_chunks
+    from .vector_store import build_vector_store
     
     # Validate inputs
     if not resume_text or not resume_text.strip():
@@ -108,7 +108,7 @@ def analyze_resume_input(resume_input, job_description: str, input_type: str = "
         # From text string
         result = analyze_resume_input(resume_text, job_description, input_type="text")
     """
-    from pdf_loader import extract_text_from_pdf_bytes
+    from .pdf_loader import extract_text_from_pdf_bytes
     
     # Validate input_type
     if input_type not in ("pdf", "text"):
@@ -260,7 +260,7 @@ def build_rag_chain():
     Returns:
         Function that takes job_description and returns analysis dict
     """
-    from retriever import load_retriever
+    from .retriever import load_retriever
     
     retriever = load_retriever()
     api_key = os.getenv("GOOGLE_API_KEY")

@@ -13,4 +13,8 @@ faiss-cpu
 
 python-dotenv
 
+fastapi
+uvicorn
+python-multipart
+
 streamlit
