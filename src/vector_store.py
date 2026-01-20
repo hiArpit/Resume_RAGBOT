@@ -96,6 +96,31 @@ def build_vector_store(chunks: List[Document], persist_directory: str = FAISS_DI
     return vectordb
 
 
+# ------------------ BUILD IN-MEMORY FAISS STORE (NO PERSISTENCE) ------------------
+
+def build_in_memory_faiss(chunks: List[Document]) -> FAISS:
+    """
+    Build in-memory FAISS vector store from chunks (no disk persistence).
+    
+    Useful for per-request FAISS creation where you don't want to:
+    - Save to disk
+    - Persist across requests
+    - Share indexes between users
+    
+    The FAISS index exists only in RAM and is automatically garbage-collected
+    when the function returns and the index goes out of scope.
+    
+    Args:
+        chunks: List of Document chunks to embed and index
+    
+    Returns:
+        In-memory FAISS vectorstore (not saved to disk)
+    """
+    embeddings = get_embedding_model()
+    vectordb = FAISS.from_documents(chunks, embeddings)
+    return vectordb
+
+
 # ------------------ LOAD EXISTING FAISS STORE ------------------
 
 def load_vector_store(persist_directory: str = FAISS_DIR):

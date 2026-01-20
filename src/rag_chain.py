@@ -78,6 +78,57 @@ def analyze_resume(resume_text: str, job_description: str) -> Dict[str, Any]:
     }
 
 
+def analyze_resume_input(resume_input, job_description: str, input_type: str = "text") -> Dict[str, Any]:
+    """
+    Analyze resume from dynamic input (PDF bytes or text string).
+    
+    Wrapper around analyze_resume() that handles both PDF and text input.
+    Extracts text from PDF if needed, then runs the full RAG pipeline.
+    
+    Args:
+        resume_input: Either:
+            - bytes: Raw PDF file content
+            - str: Resume text directly
+        job_description: Job description to compare against
+        input_type: Type of input, either "pdf" or "text" (default: "text")
+    
+    Returns:
+        Dictionary with:
+        - "extracted_skills": List of skill strings
+        - "ats_result": Dict with scores and recommendations
+    
+    Raises:
+        ValueError: If input type is invalid, text extraction fails, or inputs are empty
+    
+    Examples:
+        # From PDF bytes (uploaded file)
+        pdf_bytes = request.files['resume'].read()
+        result = analyze_resume_input(pdf_bytes, job_description, input_type="pdf")
+        
+        # From text string
+        result = analyze_resume_input(resume_text, job_description, input_type="text")
+    """
+    from pdf_loader import extract_text_from_pdf_bytes
+    
+    # Validate input_type
+    if input_type not in ("pdf", "text"):
+        raise ValueError(f"input_type must be 'pdf' or 'text', got '{input_type}'")
+    
+    # Extract resume text based on input type
+    if input_type == "pdf":
+        if not isinstance(resume_input, bytes):
+            raise ValueError("For input_type='pdf', resume_input must be bytes")
+        resume_text = extract_text_from_pdf_bytes(resume_input)
+    
+    elif input_type == "text":
+        if not isinstance(resume_input, str):
+            raise ValueError("For input_type='text', resume_input must be string")
+        resume_text = resume_input
+    
+    # Run core RAG analysis with extracted text
+    return analyze_resume(resume_text, job_description)
+
+
 # ==================== HELPER FUNCTIONS ====================
 
 def _extract_skills_from_resume(llm: ChatGoogleGenerativeAI, resume_content: str) -> list:
