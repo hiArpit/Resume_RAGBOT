@@ -1,47 +1,97 @@
 import os, json
+from typing import Dict, Any
+
 from langchain_google_genai import ChatGoogleGenerativeAI
-# Importing LangChain's wrapper for using Gemini as LLM
-# This will allow us to call Gemini Models
-from retriever import load_retriever
-# load_retriever() loads your FAISS index and returns a retriever that contains relevant chunks
 
 from dotenv import load_dotenv
 load_dotenv()
-# Loads the .env file so GOOGLE_API_KEY becomes availabke to the program
 
-# Building RAG CHAIN FUNCTION
-def build_rag_chain():
+
+# ==================== CORE REUSABLE RAG FUNCTION ====================
+
+def analyze_resume(resume_text: str, job_description: str) -> Dict[str, Any]:
     """
-    Creates the full RAG pipeline:
-    retriever -> prompt builder -> Gemini -> answer
+    Core RAG pipeline for resume ATS analysis.
+    
+    Takes raw resume text and job description, performs complete analysis:
+    - Chunks the resume text (using chunker.make_chunks)
+    - Builds in-memory FAISS vector store (using vector_store.build_vector_store)
+    - Retrieves relevant chunks based on job description
+    - Extracts skills from retrieved chunks
+    - Evaluates ATS score against job description
+    
+    Args:
+        resume_text: Raw resume text (string, can be multi-line)
+        job_description: Job description to compare against
+    
+    Returns:
+        Dictionary with:
+        - "extracted_skills": List of skill strings
+        - "ats_result": Dict with scores and recommendations
+    
+    Raises:
+        ValueError: If inputs are empty or API key not set
     """
-    # Here, we are building entire RAG system
-    # It returns a function you can call to ask questions
-
-    retriever = load_retriever()
-    # Calls load_retriever()
-    # This gives access to FAISS vectorstore, embedded chunks
-    # This retriever fetches the top-k most relevant chunks for every query.
-
+    from chunker import make_chunks
+    from vector_store import build_vector_store
+    
+    # Validate inputs
+    if not resume_text or not resume_text.strip():
+        raise ValueError("Resume text cannot be empty")
+    if not job_description or not job_description.strip():
+        raise ValueError("Job description cannot be empty")
+    
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise ValueError("GOOGLE_API_KEY not found in environment")
+    
+    # STEP 1: Chunk the resume text using existing chunker
+    # make_chunks expects List[str] of pages, so wrap single text as single page
+    chunks = make_chunks([resume_text])
+    
+    # STEP 2: Build in-memory FAISS vector store (no disk persistence)
+    # persist_directory=None keeps FAISS index in-memory only, prevents disk writes
+    vectordb = build_vector_store(chunks, persist_directory=None)
+    
+    # STEP 3: Create retriever and retrieve relevant chunks
+    retriever = vectordb.as_retriever(search_kwargs={"k": 5})
+    docs = retriever.invoke(job_description)
+    context = "\n\n".join([d.page_content for d in docs])
+    
+    # STEP 4: Initialize LLM
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash-lite",
         temperature=0.2,
-        google_api_key=os.getenv("GOOGLE_API_KEY")
+        google_api_key=api_key
     )
-    # ChatGoogleGenerativeAI creates a Gemini model object using LangChain
-    # model: which Gemini LLM to use
-    # temperature set to 0.2: low randomness = more factual answers
-    # google_api_key: pulled from .env file
+    
+    # STEP 5: Extract skills from retrieved context
+    extracted_skills = _extract_skills_from_resume(llm, context)
+    
+    # STEP 6: Evaluate ATS score
+    ats_result = _evaluate_ats(llm, context, job_description, extracted_skills)
+    
+    # Return structured result (FAISS automatically garbage collected after this function)
+    return {
+        "extracted_skills": extracted_skills,
+        "ats_result": ats_result
+    }
 
-    # this llm object will be used to answer questions using retrieved context
 
-    ### SKILL EXTRACTION FUNCTION
-    def extract_skills_from_resume(resume_content: str):
-        """
-        Extract explicitly mentioned skills from resume content.
-        Returns a list of clean, standardized skill names.
-        """
-        skill_extraction_prompt = f"""
+# ==================== HELPER FUNCTIONS ====================
+
+def _extract_skills_from_resume(llm: ChatGoogleGenerativeAI, resume_content: str) -> list:
+    """
+    Extract explicitly mentioned skills from resume content.
+    
+    Args:
+        llm: ChatGoogleGenerativeAI instance
+        resume_content: Resume text to analyze
+    
+    Returns:
+        List of skill strings
+    """
+    skill_extraction_prompt = f"""
 You are a resume skill extractor. Analyze the resume content and extract ONLY the explicitly mentioned skills.
 
 Resume Content:
@@ -60,31 +110,39 @@ Rules:
 - Remove duplicates
 - If no skills are found, return empty array
 """
-        response = llm.invoke(skill_extraction_prompt)
-        raw_response = response.content.strip()
-        
-        # Clean markdown code blocks if present
-        if raw_response.startswith("```"):
-            raw_response = raw_response.split("```")[1]
-            if raw_response.startswith("json\n"):
-                raw_response = raw_response[5:]
-        
-        try:
-            parsed_skills = json.loads(raw_response)
-            return parsed_skills.get("skills", [])
-        except json.JSONDecodeError:
-            return []
+    response = llm.invoke(skill_extraction_prompt)
+    raw_response = response.content.strip()
+    
+    # Clean markdown code blocks if present
+    if raw_response.startswith("```"):
+        raw_response = raw_response.split("```")[1]
+        if raw_response.startswith("json\n"):
+            raw_response = raw_response[5:]
+    
+    try:
+        parsed_skills = json.loads(raw_response)
+        return parsed_skills.get("skills", [])
+    except json.JSONDecodeError:
+        return []
 
-    ### ATS EVALUATION FUNCTION
-    def evaluate_ats(resume_content: str, job_description: str, extracted_skills: list):
-        """
-        Evaluate resume against job description using ATS criteria.
-        Uses extracted skills as context for the evaluation.
-        """
-        # Include extracted skills in the prompt context
-        skills_context = f"\n\nExtracted Skills:\n{', '.join(extracted_skills)}" if extracted_skills else ""
-        
-        ats_prompt = f"""
+
+def _evaluate_ats(llm: ChatGoogleGenerativeAI, resume_content: str, job_description: str, extracted_skills: list) -> Dict[str, Any]:
+    """
+    Evaluate resume against job description using ATS criteria.
+    
+    Args:
+        llm: ChatGoogleGenerativeAI instance
+        resume_content: Resume text
+        job_description: Job description
+        extracted_skills: List of skills already extracted
+    
+    Returns:
+        Dict with ATS scores and recommendations
+    """
+    # Include extracted skills in the prompt context
+    skills_context = f"\n\nExtracted Skills:\n{', '.join(extracted_skills)}" if extracted_skills else ""
+    
+    ats_prompt = f"""
 You are an ATS (Applicant Tracking System) evaluator.
 
 Analyze the resume content against the job description and return ONLY valid JSON.
@@ -121,54 +179,64 @@ Rules:
 - Do NOT use external knowledge
 - If data is missing, mark it clearly
 """
-        response = llm.invoke(ats_prompt)
-        raw_response = response.content.strip()
-        
-        # Clean markdown code blocks if present
-        if raw_response.startswith("```"):
-            raw_response = raw_response.split("```")[1]
-            if raw_response.startswith("json\n"):
-                raw_response = raw_response[5:]
-        
-        try:
-            parsed_output = json.loads(raw_response)
-        except json.JSONDecodeError:
-            parsed_output = {
-                "error": "Invalid JSON response from LLM",
-                "raw_output": raw_response
-            }
-        
-        return parsed_output
+    response = llm.invoke(ats_prompt)
+    raw_response = response.content.strip()
+    
+    # Clean markdown code blocks if present
+    if raw_response.startswith("```"):
+        raw_response = raw_response.split("```")[1]
+        if raw_response.startswith("json\n"):
+            raw_response = raw_response[5:]
+    
+    try:
+        parsed_output = json.loads(raw_response)
+    except json.JSONDecodeError:
+        parsed_output = {
+            "error": "Invalid JSON response from LLM",
+            "raw_output": raw_response
+        }
+    
+    return parsed_output
 
-    ### RAG FUNCTION
+
+# ==================== LEGACY CLI SUPPORT ====================
+
+def build_rag_chain():
+    """
+    Creates the full RAG pipeline for CLI compatibility.
+    Uses pre-built FAISS index from load_retriever().
+    
+    Returns:
+        Function that takes job_description and returns analysis dict
+    """
+    from retriever import load_retriever
+    
+    retriever = load_retriever()
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise ValueError("GOOGLE_API_KEY not found in environment")
+    
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash-lite",
+        temperature=0.2,
+        google_api_key=api_key
+    )
+
     def rag_ask(question: str):
         """
         Run the complete RAG flow with skill extraction and ATS evaluation.
-        Returns combined results: extracted skills + ATS evaluation.
+        Uses pre-built FAISS index from file.
         """
         docs = retriever.invoke(question)
-        # Sends the question to FAISS
-        # FAISS embeds the question[converting it into numerical vector] -> compares it with your chunk vectors -> returns top-k chunks
-        # docs will be the list of LangChain Document objects [doc.page_content and doc.metadata]
-        
         context = "\n\n".join([d.page_content for d in docs])
-        # Here, We are extracting text from each retrieved chunk[which is in Document object form]
-        # Joins them with two newlines to form a readable block
-        # This becomes the "source of truth" for the model
-
-        # STEP 1: Extract skills from resume content
-        extracted_skills = extract_skills_from_resume(context)
         
-        # STEP 2: Evaluate ATS with extracted skills as context
-        ats_result = evaluate_ats(context, question, extracted_skills)
+        # Use core helper functions
+        extracted_skills = _extract_skills_from_resume(llm, context)
+        ats_result = _evaluate_ats(llm, context, question, extracted_skills)
         
-        # STEP 3: Combine both results into final output
-        final_output = {
+        return {
             "extracted_skills": extracted_skills,
             "ats_result": ats_result
         }
-        
-        return final_output
     
     return rag_ask
-    # build_rag_chain() returns the function that performs a full RAG lookup + skill extraction + ATS evaluation

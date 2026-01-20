@@ -68,7 +68,15 @@ def build_vector_store(chunks: List[Document], persist_directory: str = FAISS_DI
     Steps:
     1. Convert text chunks → embeddings using Gemini.
     2. Store them inside FAISS (in-memory database).
-    3. Save the FAISS index to disk so the user does NOT need to rebuild every time.
+    3. Optionally save the FAISS index to disk (if persist_directory is provided).
+
+    Args:
+        chunks: List of Document chunks to embed and store
+        persist_directory: Directory to save FAISS index. If None, keeps index in-memory only.
+                          Defaults to FAISS_DIR for backward compatibility.
+
+    Returns:
+        FAISS vectorstore (in-memory or persisted, depending on persist_directory)
     """
 
     print("Creating embedding model...")
@@ -77,11 +85,13 @@ def build_vector_store(chunks: List[Document], persist_directory: str = FAISS_DI
     print("Building FAISS index (this may take time on first run)...")
     vectordb = FAISS.from_documents(chunks, embeddings)
 
-    # Ensure folder exists
-    os.makedirs(persist_directory, exist_ok=True)
+    # Only persist to disk if persist_directory is provided and not None
+    if persist_directory is not None:
+        # Ensure folder exists
+        os.makedirs(persist_directory, exist_ok=True)
 
-    # Save FAISS DB to disk
-    vectordb.save_local(persist_directory)
+        # Save FAISS DB to disk
+        vectordb.save_local(persist_directory)
 
     return vectordb
 
