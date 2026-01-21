@@ -5,7 +5,8 @@ FastAPI backend for Resume ATS Analysis
 Exposes the RAG pipeline as a RESTful API.
 
 Endpoints:
-- POST /analyze-resume: Analyze a resume PDF against a job description
+- POST /extract-skills: Extract skills from a resume PDF
+- POST /evaluate-ats: Evaluate ATS score against a job description
 - GET /health: Health check endpoint
 """
 
@@ -22,7 +23,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import core RAG functions (relative imports)
-from .rag_chain import analyze_resume
+from .rag_chain import extract_skills_only, evaluate_ats_only
 from .pdf_loader import extract_text_from_pdf_bytes
 
 
@@ -45,10 +46,21 @@ class HealthResponse(BaseModel):
     version: str
 
 
-class AnalysisResponse(BaseModel):
-    """Resume analysis response"""
+class SkillsResponse(BaseModel):
+    """Skills extraction response"""
     extracted_skills: list
-    ats_result: Dict[str, Any]
+
+
+class AtsResponse(BaseModel):
+    """ATS evaluation response"""
+    ats_score: int
+    skills_match_score: int
+    experience_relevance_score: int
+    tools_keywords_score: int
+    resume_clarity_score: int
+    missing_skills: list
+    weak_areas: list
+    suggestions: list
 
 
 class ErrorResponse(BaseModel):
@@ -74,29 +86,93 @@ async def health_check():
     )
 
 
-@app.post("/analyze-resume", response_model=AnalysisResponse, tags=["Analysis"])
-async def analyze_resume_endpoint(
-    resume: UploadFile = File(..., description="Resume PDF file"),
-    job_description: str = Form(..., description="Job description text")
+@app.post("/extract-skills", response_model=SkillsResponse, tags=["Analysis"])
+async def extract_skills_endpoint(
+    resume: UploadFile = File(..., description="Resume PDF file")
 ) -> Dict[str, Any]:
     """
-    Analyze a resume against a job description.
+    Extract skills from a resume.
     
     Process:
     1. Read uploaded PDF file into bytes (in-memory, no disk storage)
     2. Extract text from PDF
-    3. Run RAG analysis against job description
-    4. Return structured results
+    3. Extract skills using RAG pipeline
+    4. Return extracted skills only
+    
+    Args:
+        resume: Uploaded PDF file
+    
+    Returns:
+        Dict with extracted_skills list
+    
+    Raises:
+        HTTPException: If PDF extraction fails or analysis errors occur
+    """
+    
+    try:
+        # Read PDF file bytes (in-memory, no disk I/O)
+        pdf_bytes = await resume.read()
+        
+        if not pdf_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail="Resume file is empty"
+            )
+        
+        # Extract text from PDF
+        try:
+            resume_text = extract_text_from_pdf_bytes(pdf_bytes)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=str(e)
+            )
+        
+        # Extract skills
+        try:
+            result = extract_skills_only(resume_text)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=str(e)
+            )
+        
+        return result
+    
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Catch unexpected errors
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+@app.post("/evaluate-ats", response_model=AtsResponse, tags=["Analysis"])
+async def evaluate_ats_endpoint(
+    resume: UploadFile = File(..., description="Resume PDF file"),
+    job_description: str = Form(..., description="Job description text")
+) -> Dict[str, Any]:
+    """
+    Evaluate ATS score of a resume against a job description.
+    
+    Process:
+    1. Read uploaded PDF file into bytes (in-memory, no disk storage)
+    2. Extract text from PDF
+    3. Run ATS evaluation against job description
+    4. Return ATS scores and recommendations
     
     Args:
         resume: Uploaded PDF file
         job_description: Job description to compare against
     
     Returns:
-        Dict with extracted_skills and ats_result
+        Dict with ATS scores, missing skills, weak areas, and suggestions
     
     Raises:
-        HTTPException: If PDF extraction fails or analysis errors occur
+        HTTPException: If PDF extraction fails, inputs are invalid, or analysis errors occur
     """
     
     # Validate job description
@@ -125,9 +201,9 @@ async def analyze_resume_endpoint(
                 detail=str(e)
             )
         
-        # Run RAG analysis
+        # Evaluate ATS
         try:
-            result = analyze_resume(resume_text, job_description)
+            result = evaluate_ats_only(resume_text, job_description)
         except ValueError as e:
             raise HTTPException(
                 status_code=400,
@@ -171,7 +247,8 @@ async def startup_event():
     print("=" * 70)
     print("✓ FastAPI application initialized")
     print("✓ Endpoints available:")
-    print("  - POST /analyze-resume (Resume analysis)")
+    print("  - POST /extract-skills (Extract skills from resume)")
+    print("  - POST /evaluate-ats (Evaluate ATS score)")
     print("  - GET /health (Health check)")
     print("  - GET /docs (API documentation)")
     print("=" * 70)

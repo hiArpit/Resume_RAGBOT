@@ -7,30 +7,92 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-# ==================== CORE REUSABLE RAG FUNCTION ====================
+# ==================== BACKEND API FUNCTIONS ====================
 
-def analyze_resume(resume_text: str, job_description: str) -> Dict[str, Any]:
+def extract_skills_only(resume_text: str) -> Dict[str, Any]:
     """
-    Core RAG pipeline for resume ATS analysis.
+    Extract skills from resume text only.
     
-    Takes raw resume text and job description, performs complete analysis:
-    - Chunks the resume text (using chunker.make_chunks)
-    - Builds in-memory FAISS vector store (using vector_store.build_vector_store)
-    - Retrieves relevant chunks based on job description
-    - Extracts skills from retrieved chunks
-    - Evaluates ATS score against job description
+    Performs skill extraction on raw resume text without requiring job description.
+    Uses in-memory FAISS vector store for optimal chunking and retrieval.
+    
+    Args:
+        resume_text: Raw resume text (string, can be multi-line)
+    
+    Returns:
+        Dictionary with:
+        - "extracted_skills": List of skill strings
+    
+    Raises:
+        ValueError: If resume text is empty or API key not set
+    
+    Example:
+        result = extract_skills_only(resume_text)
+        skills = result["extracted_skills"]  # ["Python", "AWS", ...]
+    """
+    from .chunker import make_chunks
+    from .vector_store import build_vector_store
+    
+    # Validate input
+    if not resume_text or not resume_text.strip():
+        raise ValueError("Resume text cannot be empty")
+    
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise ValueError("GOOGLE_API_KEY not found in environment")
+    
+    # STEP 1: Chunk the resume text
+    chunks = make_chunks([resume_text])
+    
+    # STEP 2: Build in-memory FAISS vector store (no disk persistence)
+    vectordb = build_vector_store(chunks, persist_directory=None)
+    
+    # STEP 3: Retrieve relevant chunks
+    retriever = vectordb.as_retriever(search_kwargs={"k": 10})
+    docs = retriever.invoke("skills experience")
+    context = "\n\n".join([d.page_content for d in docs])
+    
+    # STEP 4: Initialize LLM
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash-lite",
+        temperature=0.2,
+        google_api_key=api_key
+    )
+    
+    # STEP 5: Extract skills using existing helper
+    extracted_skills = _extract_skills_from_resume(llm, context)
+    
+    return {"extracted_skills": extracted_skills}
+
+
+def evaluate_ats_only(resume_text: str, job_description: str) -> Dict[str, Any]:
+    """
+    Evaluate ATS score of resume against job description.
+    
+    Performs ATS evaluation on raw resume text and job description.
+    Uses in-memory FAISS vector store for optimal chunking and retrieval.
     
     Args:
         resume_text: Raw resume text (string, can be multi-line)
         job_description: Job description to compare against
     
     Returns:
-        Dictionary with:
-        - "extracted_skills": List of skill strings
-        - "ats_result": Dict with scores and recommendations
+        Dictionary with ATS scores and recommendations:
+        - "ats_score": Overall score (0-100)
+        - "skills_match_score": Score for skills match (out of 40)
+        - "experience_relevance_score": Score for experience (out of 30)
+        - "tools_keywords_score": Score for tools & keywords (out of 20)
+        - "resume_clarity_score": Score for clarity (out of 10)
+        - "missing_skills": List of missing skills
+        - "weak_areas": List of weak areas
+        - "suggestions": List of improvement suggestions
     
     Raises:
         ValueError: If inputs are empty or API key not set
+    
+    Example:
+        result = evaluate_ats_only(resume_text, job_description)
+        score = result["ats_score"]  # 75
     """
     from .chunker import make_chunks
     from .vector_store import build_vector_store
@@ -45,15 +107,13 @@ def analyze_resume(resume_text: str, job_description: str) -> Dict[str, Any]:
     if not api_key:
         raise ValueError("GOOGLE_API_KEY not found in environment")
     
-    # STEP 1: Chunk the resume text using existing chunker
-    # make_chunks expects List[str] of pages, so wrap single text as single page
+    # STEP 1: Chunk the resume text
     chunks = make_chunks([resume_text])
     
     # STEP 2: Build in-memory FAISS vector store (no disk persistence)
-    # persist_directory=None keeps FAISS index in-memory only, prevents disk writes
     vectordb = build_vector_store(chunks, persist_directory=None)
     
-    # STEP 3: Create retriever and retrieve relevant chunks
+    # STEP 3: Retrieve relevant chunks based on job description
     retriever = vectordb.as_retriever(search_kwargs={"k": 5})
     docs = retriever.invoke(job_description)
     context = "\n\n".join([d.page_content for d in docs])
@@ -65,68 +125,10 @@ def analyze_resume(resume_text: str, job_description: str) -> Dict[str, Any]:
         google_api_key=api_key
     )
     
-    # STEP 5: Extract skills from retrieved context
-    extracted_skills = _extract_skills_from_resume(llm, context)
+    # STEP 5: Evaluate ATS using existing helper (no skill extraction)
+    ats_result = _evaluate_ats(llm, context, job_description, extracted_skills=[])
     
-    # STEP 6: Evaluate ATS score
-    ats_result = _evaluate_ats(llm, context, job_description, extracted_skills)
-    
-    # Return structured result (FAISS automatically garbage collected after this function)
-    return {
-        "extracted_skills": extracted_skills,
-        "ats_result": ats_result
-    }
-
-
-def analyze_resume_input(resume_input, job_description: str, input_type: str = "text") -> Dict[str, Any]:
-    """
-    Analyze resume from dynamic input (PDF bytes or text string).
-    
-    Wrapper around analyze_resume() that handles both PDF and text input.
-    Extracts text from PDF if needed, then runs the full RAG pipeline.
-    
-    Args:
-        resume_input: Either:
-            - bytes: Raw PDF file content
-            - str: Resume text directly
-        job_description: Job description to compare against
-        input_type: Type of input, either "pdf" or "text" (default: "text")
-    
-    Returns:
-        Dictionary with:
-        - "extracted_skills": List of skill strings
-        - "ats_result": Dict with scores and recommendations
-    
-    Raises:
-        ValueError: If input type is invalid, text extraction fails, or inputs are empty
-    
-    Examples:
-        # From PDF bytes (uploaded file)
-        pdf_bytes = request.files['resume'].read()
-        result = analyze_resume_input(pdf_bytes, job_description, input_type="pdf")
-        
-        # From text string
-        result = analyze_resume_input(resume_text, job_description, input_type="text")
-    """
-    from .pdf_loader import extract_text_from_pdf_bytes
-    
-    # Validate input_type
-    if input_type not in ("pdf", "text"):
-        raise ValueError(f"input_type must be 'pdf' or 'text', got '{input_type}'")
-    
-    # Extract resume text based on input type
-    if input_type == "pdf":
-        if not isinstance(resume_input, bytes):
-            raise ValueError("For input_type='pdf', resume_input must be bytes")
-        resume_text = extract_text_from_pdf_bytes(resume_input)
-    
-    elif input_type == "text":
-        if not isinstance(resume_input, str):
-            raise ValueError("For input_type='text', resume_input must be string")
-        resume_text = resume_input
-    
-    # Run core RAG analysis with extracted text
-    return analyze_resume(resume_text, job_description)
+    return ats_result
 
 
 # ==================== HELPER FUNCTIONS ====================
